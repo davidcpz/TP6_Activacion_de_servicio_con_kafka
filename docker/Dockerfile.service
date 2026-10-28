@@ -1,0 +1,31 @@
+# Una sola imagen parametrizada para los servicios NestJS del monorepo.
+# docker build -f docker/Dockerfile.service --build-arg APP=billing-service .
+
+# --- dependencias (compartidas por todas las apps: se instalan y cachean una sola vez)
+FROM node:22-alpine AS deps
+WORKDIR /repo
+COPY package.json package-lock.json* ./
+RUN if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
+
+# --- sólo dependencias de producción (mismas versiones que las de build)
+FROM deps AS prod-deps
+RUN npm prune --omit=dev
+
+# --- build de la app pedida: webpack genera un único dist/apps/<app>/main.js
+FROM deps AS build
+COPY tsconfig.json nest-cli.json webpack.config.js ./
+COPY libs ./libs
+COPY apps ./apps
+ARG APP
+RUN test -n "$APP" || (echo "Falta --build-arg APP" && exit 1)
+RUN npx nest build ${APP}
+RUN mkdir -p /out && MAIN="$(find dist -type f -name main.js | head -n 1)" && test -n "$MAIN" && cp "$MAIN" /out/main.js
+
+# --- runtime
+FROM node:22-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+ARG APP
+COPY --from=prod-deps /repo/node_modules ./node_modules
+COPY --from=build /out/main.js ./main.js
+CMD ["node", "main.js"]

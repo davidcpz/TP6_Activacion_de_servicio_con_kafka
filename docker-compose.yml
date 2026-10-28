@@ -1,0 +1,210 @@
+# POC Activación de Servicios con Kafka
+# Levantar todo:  docker compose up --build
+# Demo UI:        http://localhost:5173
+# Kafka UI:       http://localhost:8080
+# Mailhog:        http://localhost:8025
+# API:            http://localhost:3000
+
+x-node-service: &node-service
+  restart: on-failure
+  depends_on: &node-deps
+    kafka-init:
+      condition: service_completed_successfully
+    mongo:
+      condition: service_healthy
+
+x-common-env: &common-env
+  KAFKA_BROKERS: kafka:29092
+  MONGO_URI: mongodb://mongo:27017/?replicaSet=rs0
+  KAFKAJS_NO_PARTITIONER_WARNING: "1"
+  TZ: America/Argentina/Buenos_Aires
+
+services:
+  # ---------------------------------------------------------------- infraestructura
+  kafka:
+    image: apache/kafka:3.9.0
+    hostname: kafka
+    ports:
+      - "9092:9092"
+    environment:
+      CLUSTER_ID: "4L6g3nShT-eMCtK--X86sw"
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      # PLAINTEXT      -> red interna de Docker (kafka:29092), la usan los servicios
+      # PLAINTEXT_HOST -> desde la máquina host (localhost:9092)
+      KAFKA_LISTENERS: PLAINTEXT://:29092,CONTROLLER://:29093,PLAINTEXT_HOST://:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_HEAP_OPTS: "-Xms512m -Xmx512m"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:29092 > /dev/null 2>&1"]
+      interval: 5s
+      timeout: 15s
+      start_period: 15s
+      retries: 30
+
+  kafka-init:
+    image: apache/kafka:3.9.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      BOOTSTRAP: kafka:29092
+    volumes:
+      - ./docker/create-topics.sh:/create-topics.sh:ro
+    entrypoint: ["/bin/sh", "/create-topics.sh"]
+    restart: "no"
+
+  kafka-ui:
+    image: kafbat/kafka-ui:v1.2.0
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: activation-poc
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  mongo:
+    image: mongo:7.0
+    hostname: mongo
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27018:27017"
+    # El healthcheck inicializa el replica set (necesario para transacciones)
+    # y sólo da OK cuando el nodo ya es PRIMARY.
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - "try { const s = rs.status(); quit(s.myState === 1 ? 0 : 1) } catch (e) { rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'mongo:27017'}]}); quit(1) }"
+      interval: 5s
+      timeout: 10s
+      start_period: 10s
+      retries: 30
+  mailhog:
+    image: axllent/mailpit:v1.21.0
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+
+  # ---------------------------------------------------------------- servicios NestJS
+  activation-api:
+    <<: *node-service
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.service
+      args:
+        APP: activation-api
+    ports:
+      - "3000:3000"
+    environment:
+      <<: *common-env
+      PORT: "3000"
+      KAFKA_CLIENT_ID: activation-api
+      KAFKA_GROUP_ID: activation-api
+      MONGO_DB: activation_db
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      start_period: 20s
+      retries: 30
+
+  billing-service:
+    <<: *node-service
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.service
+      args:
+        APP: billing-service
+    environment:
+      <<: *common-env
+      KAFKA_CLIENT_ID: billing-service
+      KAFKA_GROUP_ID: billing-svc
+      MONGO_DB: billing_db
+
+  provisioning-service:
+    <<: *node-service
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.service
+      args:
+        APP: provisioning-service
+    environment:
+      <<: *common-env
+      KAFKA_CLIENT_ID: provisioning-service
+      KAFKA_GROUP_ID: provisioning-svc
+      MONGO_DB: provisioning_db
+
+  notification-service:
+    <<: *node-service
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.service
+      args:
+        APP: notification-service
+    depends_on:
+      <<: *node-deps
+      mailhog:
+        condition: service_started
+    environment:
+      <<: *common-env
+      KAFKA_CLIENT_ID: notification-service
+      KAFKA_GROUP_ID: notification-svc
+      MONGO_DB: notification_db
+      SMTP_HOST: mailhog
+      SMTP_PORT: "1025"
+      MAIL_FROM: "Activaciones POC <no-reply@activation-poc.local>"
+
+  crm-analytics-service:
+    <<: *node-service
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.service
+      args:
+        APP: crm-analytics-service
+    environment:
+      <<: *common-env
+      KAFKA_CLIENT_ID: crm-analytics-service
+      KAFKA_GROUP_ID: crm-analytics
+      MONGO_DB: crm_db
+
+  # Escenario 5: sólo se levanta con  docker compose --profile loyalty up -d loyalty-service
+  loyalty-service:
+    <<: *node-service
+    profiles: ["loyalty"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.service
+      args:
+        APP: loyalty-service
+    environment:
+      <<: *common-env
+      KAFKA_CLIENT_ID: loyalty-service
+      KAFKA_GROUP_ID: loyalty-svc
+      MONGO_DB: loyalty_db
+
+  # ---------------------------------------------------------------- frontend
+  demo-ui:
+    build:
+      context: ./apps/demo-ui
+      args:
+        VITE_API_URL: http://localhost:3000
+    ports:
+      - "5173:80"
+    depends_on:
+      activation-api:
+        condition: service_started

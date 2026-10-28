@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "ES2021",
+    "lib": ["ES2021"],
+    "declaration": false,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "baseUrl": "./",
+    "incremental": false,
+    "skipLibCheck": true,
+    "strict": false,
+    "strictNullChecks": false,
+    "noImplicitAny": false,
+    "forceConsistentCasingInFileNames": true,
+    "types": ["node"],
+    "paths": {
+      "@poc/contracts": ["libs/contracts/src"],
+      "@poc/contracts/*": ["libs/contracts/src/*"],
+      "@poc/kafka-toolkit": ["libs/kafka-toolkit/src"],
+      "@poc/kafka-toolkit/*": ["libs/kafka-toolkit/src/*"]
+    }
+  },
+  "include": ["apps/*/src/**/*.ts", "libs/*/src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "apps/demo-ui"]
+}

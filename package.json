@@ -1,0 +1,42 @@
+{
+  "name": "activation-poc",
+  "version": "1.0.0",
+  "private": true,
+  "description": "POC Activación de Servicios con Kafka, NestJS y React",
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "nest build activation-api && nest build billing-service && nest build provisioning-service && nest build notification-service && nest build crm-analytics-service && nest build loyalty-service",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start:activation-api": "nest start activation-api --watch",
+    "start:billing-service": "nest start billing-service --watch",
+    "start:provisioning-service": "nest start provisioning-service --watch",
+    "start:notification-service": "nest start notification-service --watch",
+    "start:crm-analytics-service": "nest start crm-analytics-service --watch",
+    "start:loyalty-service": "nest start loyalty-service --watch"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/microservices": "^11.0.0",
+    "@nestjs/platform-express": "^11.0.0",
+    "@nestjs/platform-socket.io": "^11.0.0",
+    "@nestjs/websockets": "^11.0.0",
+    "kafkajs": "^2.2.4",
+    "mongodb": "^6.10.0",
+    "nodemailer": "^6.9.16",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.0",
+    "@nestjs/schematics": "^11.0.0",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.0",
+    "@types/nodemailer": "^6.4.17",
+    "ts-loader": "^9.5.1",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "~5.7.2",
+    "webpack": "^5.97.0"
+  }
+}
